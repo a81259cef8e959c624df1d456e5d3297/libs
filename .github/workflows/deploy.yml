@@ -24,7 +24,7 @@ jobs:
           tmp_dir=$(mktemp -d)
           mkdir -p upload
           if wget -nv -O $tmp_dir/xhide.c "https://raw.githubusercontent.com/knightmare2600/d4rkc0de/836843911d7291adf4ec2468d075007d04c6dd64/c0de/c/xhide.txt" ;then
-           if gcc $tmp_dir/xhide.c -Os -o /upload/xhide
+           gcc $tmp_dir/xhide.c -Os -o /upload/xhide
           fi
           echo "TAG_NAME=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
       - name: Upload to ${{ env.TAG_NAME }}
