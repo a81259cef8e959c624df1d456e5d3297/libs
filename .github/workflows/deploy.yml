@@ -1,59 +1,50 @@
-name: CI Workflow
+name: 🌟 CI Workflow
+
 on:
-  # Trigger the workflow on push events to the 'main' branch
+  # Trigger the workflow on a push to the main branch
   push:
 
-
 permissions:
-  # Grant write permissions for repository content
+  # Provide write permissions for repository content
   contents: write
 
-# Allow cancellation of in-progress runs for the same workflow group
+# Allow cancellation of in-progress runs for the same group of workflows
 concurrency:
-  group: "${{ github.workflow }} @ ${{ github.ref }}"
+  group: "${{ github.workflow }} @ ${{ github.head_ref || github.ref }}"
   cancel-in-progress: true
 
 jobs:
   build-and-release:
+    # Use the latest Ubuntu virtual environment
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    steps:
-      # Step 1: Checkout Repository
-      - name: 🛠 Checkout Repository
-        uses: actions/checkout@v3
 
-      # Step 2: Build the 'xhide' binary
-      - name: 🔨 Build 'xhide' Binary
+    steps:
+      # Step 1: Build the xhide binary
+      - name: 🛠️ Build xhide
         run: |
-          echo "🚀 Starting build process..."
+          echo "🔧 Starting xhide build process..."
           tmp_dir=$(mktemp -d)
           mkdir -p upload
           gcc scripts/xhide.c -Os -o upload/xhide
-          if [ $? -eq 0 ]; then
-            echo "✅ Build successful!"
-          else
-            echo "❌ Build failed!"
-            exit 1
-          fi
+          echo "🎉 Build completed successfully!"
           echo "TAG_NAME=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
-          echo "✨ Binary created and stored in 'upload' directory."
 
-      # Step 3: Create and upload a timestamped release
-      - name: 📦 Upload Release Artifact with Timestamp
+      # Step 2: Create and upload a timestamped release
+      - name: 🚀 Upload Timestamped Release (${{ env.TAG_NAME }})
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ env.TAG_NAME }}
-          body: |
-            **Commit SHA**: ${{ github.sha }}
-            **Build Date**: ${{ env.TAG_NAME }}
+          body: "📝 Commit SHA: ${{ github.sha }}"
           files: |
             upload/*
         continue-on-error: false
+        if: success()
 
-      # Step 4: Create and upload a 'latest' tagged release
-      - name: 🏷 Upload 'Latest' Release
+      # Step 3: Create and upload the latest release tag
+      - name: 🌐 Upload Latest Release
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,20 +53,16 @@ jobs:
           prerelease: false
           generate_release_notes: true
           tag_name: latest
-          body: |
-            **Commit SHA**: ${{ github.sha }}
-            **Release Type**: Latest Release
+          body: "📝 Commit SHA: ${{ github.sha }}"
           files: |
             upload/*
         continue-on-error: false
 
-      # Step 5: Cleanup old releases, keeping the latest 5
-      - name: 🧹 Cleanup Old Releases
+      # Step 4: Clean up old releases and retain the 5 newest
+      - name: 🗑️ Cleanup Old Releases
         uses: dev-drprasad/delete-older-releases@v0.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           keep_latest: 5
           delete_tags: true
-        continue-on-error: false
-        run: echo "🗑 Successfully cleaned up old releases, retaining the latest 5!"
