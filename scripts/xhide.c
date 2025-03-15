@@ -1,223 +1,228 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <string.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <grp.h>
+#include <errno.h>
 
-void usage(char *progname);
-
-int changeown (char *str)
-{
-	char user[256], *group;
-	struct passwd *pwd;
-	struct group *grp;
-
-	uid_t uid;
-	gid_t gid;
-
-	memset(user, '\0', sizeof(user));
-	strncpy(user, str, sizeof(user));
-
-	for (group = user; *group; group++)
-		if (*group == ':')
-		{
-			*group = '\0';
-			group++;
-			break;
-		}
-
-	if (pwd = getpwnam(user))
-	{
-
-		uid = pwd->pw_uid;
-		gid = pwd->pw_gid;
-	} else uid = (uid_t) atoi(user);
-
-	if (*group)
-		if (grp = getgrnam(group)) gid = grp->gr_gid;
-		else gid = (gid_t) atoi(group);
-
-	if (setgid(gid)) {
-		perror("Error: Can't set GID");
-		return 0;
-	}
-
-	if (setuid(uid))
-	{
-		perror("Error: Can't set UID");
-		return 0;
-	}
-
-	return 1;
+// Display usage information
+void show_usage(const char *prog_name) {
+    fprintf(stderr,
+        "XHide - Process Faker\n"
+        "Usage: %s [options] <program> [arguments]\n\n"
+        "Options:\n"
+        "  -s <string>   Fake process name\n"
+        "  -d            Run application as daemon\n"
+        "  -u <uid[:gid]> Change user and group ID\n"
+        "  -p <filename> Save PID to a file\n\n"
+        "Example: %s -s \"fake-process\" -d -p fake.pid ./real-program arg1 arg2\n",
+        prog_name, prog_name);
+    exit(EXIT_FAILURE);
 }
 
-char *fullpath(char *cmd)
-{
-	char *p, *q, *filename;
-	struct stat st;
+// Change user and group ID
+int set_user_group(const char *user_group) {
+    char user[256] = {0};
+    const char *group = NULL;
+    struct passwd *pwd;
+    struct group *grp;
+    uid_t uid;
+    gid_t gid;
 
-	if (*cmd == '/')
-		return cmd;
+    // Parse user and group
+    strncpy(user, user_group, sizeof(user) - 1);
+    group = strchr(user, ':');
+    if (group) {
+        *strchr(user, ':') = '\0'; // Split user and group
+        group++;
+    }
 
-	filename = (char *) malloc(256);
+    // Resolve UID
+    if ((pwd = getpwnam(user)) != NULL) {
+        uid = pwd->pw_uid;
+        gid = pwd->pw_gid;  // Default group is from passwd
+    } else {
+        uid = (uid_t) atoi(user);
+    }
 
-	if  (*cmd == '.')
-		if (getcwd(filename, 255) != NULL)
-		{
-			strcat(filename, "/");
-			strcat(filename, cmd);
-			return filename;
-		}
-		else
-			return NULL;
+    // Resolve GID
+    if (group) {
+        if ((grp = getgrnam(group)) != NULL) {
+            gid = grp->gr_gid;
+        } else {
+            gid = (gid_t) atoi(group);
+        }
+    }
 
-	for (p = q = (char *) getenv("PATH"); q != NULL; p = ++q)
-	{
-		if (q = (char *) strchr(q, ':'))
-			*q = (char) '\0';
+    // Set GID
+    if (setgid(gid)) {
+        perror("Error: Unable to set GID");
+        return 0;
+    }
 
-		snprintf(filename, 256, "%s/%s", p, cmd);
+    // Set UID
+    if (setuid(uid)) {
+        perror("Error: Unable to set UID");
+        return 0;
+    }
 
-		if (stat(filename, &st) != -1
-				&& S_ISREG(st.st_mode)
-				&& (st.st_mode&S_IXUSR || st.st_mode&S_IXGRP || st.st_mode&S_IXOTH))
-			return filename;
-
-		if (q == NULL)
-			break;
-	}
-
-	free(filename);
-
-	return NULL;
-
+    return 1;
 }
 
-void usage(char *progname)
-{
-	fprintf(stderr, "XHide - Process Faker, by Schizoprenic "
-			"Xnuxer Research (c) 2002\n\nOptions:\n"
+// Get the full path to an executable
+char *get_full_path(const char *cmd) {
+    char *path_env = getenv("PATH");
+    char *path = NULL;
+    char *full_path = (char *)malloc(256);
+    struct stat st;
 
-			"-s string\tFake name process\n"
-			"-d\t\tRun aplication as daemon/system (optional)\n"
-			"-u uid[:gid]\tChange UID/GID, use another user (optional)\n"
-			"-p filename\tSave PID to filename (optional)\n\n"
+    if (!full_path) {
+        perror("Memory allocation error");
+        return NULL;
+    }
 
-			"Example: %s -s \"klogd -m 0\" -d -p test.pid ./egg bot.conf\n\n",progname);
+    // If the command is an absolute path
+    if (cmd[0] == '/') {
+        strcpy(full_path, cmd);
+        return full_path;
+    }
 
-	exit(1);
+    // If the command is relative to current directory
+    if (cmd[0] == '.') {
+        if (getcwd(full_path, 255)) {
+            strcat(full_path, "/");
+            strcat(full_path, cmd);
+            return full_path;
+        }
+        free(full_path);
+        return NULL;
+    }
+
+    // Search in PATH environment variable
+    char *p = strtok(path_env, ":");
+    while (p != NULL) {
+        snprintf(full_path, 256, "%s/%s", p, cmd);
+        if (stat(full_path, &st) == 0 && S_ISREG(st.st_mode) &&
+            (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))) {
+            return full_path;
+        }
+        p = strtok(NULL, ":");
+    }
+
+    free(full_path);
+    return NULL;
 }
 
-int main(int argc,char **argv)
-{
-	char c;
-	char fake[256];
-	char *progname, *fakename;
-	char *pidfile, *fp;
-	char *execst;
+// Run the process as a daemon
+void run_as_daemon() {
+    int dev_null = open("/dev/null", O_RDWR);
+    if (dev_null == -1) {
+        perror("Error: Unable to open /dev/null");
+        exit(EXIT_FAILURE);
+    }
 
-	FILE *f;
+    if (fork() != 0) {
+        exit(EXIT_SUCCESS); // Parent exits
+    }
 
-	int runsys=0, null;
-	int j,i,n,pidnum;
-	char **newargv;
+    if (setsid() == -1) {
+        perror("Error: Unable to create a new session");
+        exit(EXIT_FAILURE);
+    }
 
-	progname = argv[0];
-	if(argc<2) usage(progname);
+    if (fork() != 0) {
+        exit(EXIT_SUCCESS); // First child exits
+    }
 
-	for (i = 1; i < argc; i++)
-	{
-		if (argv[i][0] == '-')
-			switch (c = argv[i][1])
-			{
+    umask(0);
+    dup2(dev_null, STDIN_FILENO);
+    dup2(dev_null, STDOUT_FILENO);
+    dup2(dev_null, STDERR_FILENO);
+    close(dev_null);
+}
 
-				case 's': fakename = argv[++i]; break;
-				case 'u': changeown(argv[++i]); break;
-				case 'p': pidfile = argv[++i]; break;
-				case 'd': runsys = 1; break;
+int main(int argc, char **argv) {
+    char *fake_name = NULL;
+    char *pid_file = NULL;
+    int daemon_mode = 0;
 
-				default:  usage(progname); break;
-			}
-		else break;
-	}
+    if (argc < 2) {
+        show_usage(argv[0]);
+    }
 
-	if (!(n = argc - i) || fakename == NULL) usage(progname);
+    // Parse command-line arguments
+    int opt;
+    while ((opt = getopt(argc, argv, "s:u:p:d")) != -1) {
+        switch (opt) {
+            case 's':
+                fake_name = optarg;
+                break;
+            case 'u':
+                if (!set_user_group(optarg)) {
+                    exit(EXIT_FAILURE);
+                }
+                break;
+            case 'p':
+                pid_file = optarg;
+                break;
+            case 'd':
+                daemon_mode = 1;
+                break;
+            default:
+                show_usage(argv[0]);
+        }
+    }
 
-	newargv = (char **) malloc(n * sizeof(char **) + 1);
-	for (j = 0; j < n; i++,j++) newargv[j] = argv[i];
-	newargv[j] = NULL;
+    // Validate arguments
+    if (optind >= argc || !fake_name) {
+        show_usage(argv[0]);
+    }
 
-	if ((fp = fullpath(newargv[0])) == NULL) { perror("Full path seek"); exit(1); }
-	execst = fp;
+    // Resolve full path of the executable
+    char *exec_path = get_full_path(argv[optind]);
+    if (!exec_path) {
+        perror("Error resolving executable path");
+        exit(EXIT_FAILURE);
+    }
 
-	if (n > 1)
-	{
-		memset(fake, ' ', sizeof(fake) - 1);
-		fake[sizeof(fake) - 1] = '\0';
-		strncpy(fake, fakename, strlen(fakename));
-		// Kent, this is the key point.. keke
-		newargv[0] = fake;
-		/*for (int i = 1; i < n; i++) newargv[i] = "";*/
-	}
-	else newargv[0] = fakename;
+    // Prepare the new argument list
+    int new_argc = argc - optind;
+    char **new_argv = (char **)malloc((new_argc + 1) * sizeof(char *));
+    if (!new_argv) {
+        perror("Memory allocation error");
+        free(exec_path);
+        exit(EXIT_FAILURE);
+    }
+    new_argv[0] = fake_name; // Set fake process name
+    for (int i = 1; i < new_argc; i++) {
+        new_argv[i] = argv[optind + i];
+    }
+    new_argv[new_argc] = NULL;
 
-	if (runsys)
-	{
-		if ((null = open("/dev/null", O_RDWR)) == -1)
-		{
-			perror("Error: /dev/null");
-			return -1;
-		}
+    // Run as daemon if requested
+    if (daemon_mode) {
+        run_as_daemon();
+    }
 
-		switch (fork())
-		{
-			case -1:
-				perror("Error: FORK-1");
-				return -1;
+    // Save PID to file if requested
+    if (pid_file) {
+        FILE *f = fopen(pid_file, "w");
+        if (f) {
+            fprintf(f, "%d\n", getpid());
+            fclose(f);
+        } else {
+            perror("Error writing PID file");
+        }
+    }
 
-			case  0:
-				setsid();
-				switch (fork())
-				{
-
-					case -1:
-						perror("Error: FORK-2");
-						return -1;
-
-					case  0:
-						umask(0);
-						close(0);
-						close(1);
-						close(2);
-						dup2(null, 0);
-						dup2(null, 1);
-						dup2(null, 2);
-
-						break;
-
-					default:
-						return 0;
-				}
-				break;
-			default:
-				return 0;
-		}
-	}
-
-	waitpid(-1, (int *)0, 0);
-	pidnum = getpid();
-
-	if (pidfile != NULL && (f = fopen(pidfile, "w")) != NULL)
-	{
-		fprintf(f, "%d\n", pidnum);
-		fclose(f);
-	}
-
-	//fprintf(stderr,"==> Fakename: %s PidNum: %d\n",fakename,pidnum);
-	execv(execst, newargv);
-	perror("Couldn't execute");
-	return -1;
+    // Execute the program with the fake name
+    execv(exec_path, new_argv);
+    perror("Execution failed");
+    free(exec_path);
+    free(new_argv);
+    return EXIT_FAILURE;
 }
